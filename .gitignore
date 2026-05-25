@@ -1,0 +1,15 @@
+# Generated figures
+*.png
+*.svg
+*.pdf
+
+# Julia artifacts
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+deps/deps.jl
+Manifest.toml
+
+# OS
+Thumbs.db
+desktop.ini
