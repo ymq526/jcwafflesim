@@ -26,8 +26,8 @@ circuit = [
 
 circuitdefs = Dict(
     R  => 50.0,
-    Lf => 1.0e-12,        # negligible feedline inductance (ideal short)
-    Cc => 10.0e-15,       # coupling capacitance (sets external Q) - adjust as needed
+    Lf => 10e-12,        # negligible feedline inductance (ideal short)
+    Cc => 5.2e-15,       # coupling capacitance (sets external Q) - adjust as needed
     Lr => 0.738e-9,       # resonator effective inductance
     Cr => 728e-15,        # resonator effective capacitance
 )
