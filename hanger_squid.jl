@@ -35,24 +35,26 @@ circuit = [
     ("Crj","3","4",Crj),
 
     # SQUID
-    ("Lj1","4","0",Lj),
-    ("Cj1","4","0",Cj),
-    ("L2","4","5",Ll),
-    ("Lj2","5","0",Lj),
-    ("Cj2","5","0",Cj),
+    ("L2","4","5",Ll)
+    ("L3","4","6",Ll)
+    ("Lj1","5","0",Lj),
+    ("Cj1","5","0",Cj),
+    ("Lj2","6","0",Lj),
+    ("Cj2","6","0",Cj),
 
     # Flux bias
-    ("L3","6","0",Ldc),
-    ("K1","L2","L3",K),
-    ("P3","6","0",3),
-    ("R3","6","0",1000.0),
+    ("L4","7","0",Ldc),
+    ("K1","L2","L4",K),
+    ("K2","L3","L4",-K),
+    ("P3","7","0",3),
+    ("R3","7","0",1000.0),
 ]
 
 # Convert bias current array to flux in units of Φ₀.
 # M = K*sqrt(Ll*Ldc) is the mutual inductance between the bias coil and SQUID arm.
 function current_to_flux(I; K, Ll, Ldc)
     Phi0 = 2.067833848e-15   # magnetic flux quantum h/(2e), Wb
-    M    = 0.5 * K * sqrt(Ll * Ldc)
+    M    = K * sqrt( Ll * Ldc)
     return M .* I ./ Phi0
 end
 
