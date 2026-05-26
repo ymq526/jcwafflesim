@@ -14,7 +14,7 @@ using Plots
 #   5 — SQUID bottom   (Lj2||Cj2 to gnd)
 #   6 — flux bias coil (Ldc to gnd, K with L2, P3, R3=1kΩ)
 
-@variables R Cc Lr Cr Lf Crj Lj Cj Ll Ldc K Lg
+@variables R Cc Lr Cr Lf Crj Lj Cj Ll Ldc K Lg Rr Rj
 
 circuit = [
     # Feedline
@@ -30,6 +30,7 @@ circuit = [
     ("Cc","1","3",Cc),
     ("Lr","3","0",Lr),
     ("Cr","3","0",Cr),
+    ("Rr","3","0",Rr),     # resonator internal loss, Q_int ≈ 80k at f_r
 
     # Coupling cap: resonator → SQUID
     ("Crj","3","4",Crj),
@@ -39,8 +40,10 @@ circuit = [
     ("L3","4","6",Ll),
     ("Lj1","5","0",Lj),
     ("Cj1","5","0",Cj),
+    ("Rj1","5","0",Rj),    # junction 1 internal loss, Q_int ≈ 80k at plasma freq
     ("Lj2","6","0",Lj),
     ("Cj2","6","0",Cj),
+    ("Rj2","6","0",Rj),    # junction 2 internal loss
 
     # Flux bias
     ("L4","7","0",Ldc),
@@ -66,16 +69,18 @@ circuitdefs = Dict(
     Cr   => 728e-15,      # resonator capacitance
     Crj  => 7.5e-15,      # resonator→SQUID coupling
     Lj   => 1e-9,   # junction inductance (each)
-    Cj   => 10.0e-15,     # junction capacitance (each)
+    Cj   => 100e-15,      # junction capacitance (each)
     Ll   => 34e-12,       # SQUID arm inductance
     K    => 0.999,        # mutual coupling (K=1.0 makes inv-L matrix singular)
     Ldc  => 0.74e-12,     # flux bias coil inductance
     Lg   => 100e-9,       # large shunt L (~4 kΩ at 6.8 GHz, negligible loading)
+    Rr   => 2.55e6,       # resonator internal Q ≈ 80k at f_r ≈ 6.87 GHz
+    Rj   => 8.0e6,        # junction internal Q ≈ 80k at plasma freq ≈ 15.9 GHz
 )
 
 # S21 heatmap: frequency × DC bias current
 # Fine sweep over the tuning range found with Lj=1nH: 6.72–6.82 GHz (~93 MHz span)
-ws           = 2*pi*(6.76:0.0005:6.85)*1e9   # 1 MHz steps, 181 freq pts
+ws           = 2*pi*(6.76:0.0002:6.85)*1e9   # 1 MHz steps, 181 freq pts
 wp           = (2*pi*13.7*1e9,)              # placeholder pump freq; Ip=0 throughout
 currentvals  = (-40:0.1:40)*1e-5             # ±400 μA in 5 μA steps, 161 bias pts
 
@@ -115,49 +120,58 @@ p = plot(
 savefig(p, raw"C:\Users\Carissa K\Documents\jcwafflesim\hanger_squid_s21.png")
 
 # ── Two-tone spectroscopy ──────────────────────────────────────────────────
-# Park signal at the notch frequency for each flux point; sweep the pump
-# through port 3.  A dispersive shift in S21 reveals SQUID modes coupled
-# to the resonator.
+# Park signal at the notch; sweep pump through port 3.
+# For each (flux, pump_freq), compute |S21_pump - S21_ref| in the complex
+# S21 plane, where S21_ref is taken from the pump-off sweep above.
 
 notch_idx   = [argmin(abs.(outvals[:,k])) for k in 1:size(outvals,2)]
 notch_freqs = ws[notch_idx]
 
-# Subsample flux axis — every 8th of 801 pts ≈ 101 flux points
-step_2t = 8
+# Reference S21 at the notch per flux point — reuse the Ip=0 sweep
+S21_ref_all = [outvals[notch_idx[k], k] for k in 1:length(currentvals)]
+
+# Subsample flux axis — every 4th of 801 pts → 201 flux points
+step_2t = 4
 idx_2t  = collect(1:step_2t:length(currentvals))
-curr_2t = currentvals[idx_2t]
 nf_2t   = notch_freqs[idx_2t]
 flux_2t = fluxvals[idx_2t]
 
-wp_2t_GHz = 4.0:0.1:14.0                          # pump sweep 4–14 GHz, 100 MHz steps
+wp_2t_GHz = 0:0.002:12.0             # 2 MHz steps → 6001 pump pts
 wp_2t     = 2*pi * collect(wp_2t_GHz) * 1e9
-Ip_2t     = 100e-9                                 # small pump: linear spectroscopy
+Ip_2t     = 800e-9
 
-out_2t = zeros(Complex{Float64}, length(wp_2t), length(idx_2t))
+out_2t = fill(NaN, length(wp_2t), length(idx_2t))  # |ΔS21| linear
 
-println("Two-tone: $(length(idx_2t)) flux pts × $(length(wp_2t)) pump pts …")
+println("Two-tone (|ΔS21|): $(length(idx_2t)) flux pts × $(length(wp_2t)) pump pts …")
 @time for (ki, k) in enumerate(idx_2t)
     Idc     = currentvals[k]
     ws_park = [nf_2t[ki]]
+    S21_ref = S21_ref_all[k]
     for (j, wp_j) in enumerate(wp_2t)
         src = [
             (mode=(0,), port=3, current=Idc),
             (mode=(1,), port=3, current=Ip_2t),
         ]
-        sol = hbsolve(ws_park, (wp_j,), src, (1,), (1,),
-            circuit, circuitdefs; dc=true, threewavemixing=true, fourwavemixing=true)
-        out_2t[j,ki] = sol.linearized.S((0,),2,(0,),1,1)
+        try
+            sol = hbsolve(ws_park, (wp_j,), src, (1,), (1,),
+                circuit, circuitdefs; dc=true, threewavemixing=true, fourwavemixing=true)
+            out_2t[j,ki] = abs(sol.linearized.S((0,),2,(0,),1,1) - S21_ref)
+        catch
+            # singular at this pump freq — leave NaN
+        end
     end
 end
 
 p2 = plot(
     flux_2t,
     collect(wp_2t_GHz),
-    10*log10.(abs2.(out_2t)),
-    seriestype = :heatmap,
-    xlabel     = "DC flux bias (Φ/Φ₀)",
-    ylabel     = "Pump frequency (GHz)",
-    title      = "Two-tone S21 (dB): signal at notch, pump swept",
-    size       = (800, 500),
+    out_2t,
+    seriestype  = :heatmap,
+    xlabel      = "DC flux bias (Φ/Φ₀)",
+    ylabel      = "Pump frequency (GHz)",
+    title       = "Two-tone |ΔS21|: complex distance from pump-off reference",
+    colorbar_title = "|ΔS21|",
+    clims       = (0, 1),
+    size        = (800, 500),
 )
 savefig(p2, raw"C:\Users\Carissa K\Documents\jcwafflesim\hanger_squid_2tone.png")
