@@ -35,8 +35,8 @@ circuit = [
     ("Crj","3","4",Crj),
 
     # SQUID
-    ("L2","4","5",Ll)
-    ("L3","4","6",Ll)
+    ("L2","4","5",Ll),
+    ("L3","4","6",Ll),
     ("Lj1","5","0",Lj),
     ("Cj1","5","0",Cj),
     ("Lj2","6","0",Lj),
@@ -75,9 +75,9 @@ circuitdefs = Dict(
 
 # S21 heatmap: frequency × DC bias current
 # Fine sweep over the tuning range found with Lj=1nH: 6.72–6.82 GHz (~93 MHz span)
-ws           = 2*pi*(6.75:0.0005:6.85)*1e9   # 1 MHz steps, 181 freq pts
+ws           = 2*pi*(6.76:0.0005:6.85)*1e9   # 1 MHz steps, 181 freq pts
 wp           = (2*pi*13.7*1e9,)              # placeholder pump freq; Ip=0 throughout
-currentvals  = (-100:0.5:100)*1e-5             # ±400 μA in 5 μA steps, 161 bias pts
+currentvals  = (-40:0.1:40)*1e-5             # ±400 μA in 5 μA steps, 161 bias pts
 
 Npumpharmonics       = (1,)
 Nmodulationharmonics = (1,)
@@ -112,3 +112,52 @@ p = plot(
     clims      = (-15, 0),
     size       = (800, 500),
 )
+savefig(p, raw"C:\Users\Carissa K\Documents\jcwafflesim\hanger_squid_s21.png")
+
+# ── Two-tone spectroscopy ──────────────────────────────────────────────────
+# Park signal at the notch frequency for each flux point; sweep the pump
+# through port 3.  A dispersive shift in S21 reveals SQUID modes coupled
+# to the resonator.
+
+notch_idx   = [argmin(abs.(outvals[:,k])) for k in 1:size(outvals,2)]
+notch_freqs = ws[notch_idx]
+
+# Subsample flux axis — every 8th of 801 pts ≈ 101 flux points
+step_2t = 8
+idx_2t  = collect(1:step_2t:length(currentvals))
+curr_2t = currentvals[idx_2t]
+nf_2t   = notch_freqs[idx_2t]
+flux_2t = fluxvals[idx_2t]
+
+wp_2t_GHz = 4.0:0.1:14.0                          # pump sweep 4–14 GHz, 100 MHz steps
+wp_2t     = 2*pi * collect(wp_2t_GHz) * 1e9
+Ip_2t     = 100e-9                                 # small pump: linear spectroscopy
+
+out_2t = zeros(Complex{Float64}, length(wp_2t), length(idx_2t))
+
+println("Two-tone: $(length(idx_2t)) flux pts × $(length(wp_2t)) pump pts …")
+@time for (ki, k) in enumerate(idx_2t)
+    Idc     = currentvals[k]
+    ws_park = [nf_2t[ki]]
+    for (j, wp_j) in enumerate(wp_2t)
+        src = [
+            (mode=(0,), port=3, current=Idc),
+            (mode=(1,), port=3, current=Ip_2t),
+        ]
+        sol = hbsolve(ws_park, (wp_j,), src, (1,), (1,),
+            circuit, circuitdefs; dc=true, threewavemixing=true, fourwavemixing=true)
+        out_2t[j,ki] = sol.linearized.S((0,),2,(0,),1,1)
+    end
+end
+
+p2 = plot(
+    flux_2t,
+    collect(wp_2t_GHz),
+    10*log10.(abs2.(out_2t)),
+    seriestype = :heatmap,
+    xlabel     = "DC flux bias (Φ/Φ₀)",
+    ylabel     = "Pump frequency (GHz)",
+    title      = "Two-tone S21 (dB): signal at notch, pump swept",
+    size       = (800, 500),
+)
+savefig(p2, raw"C:\Users\Carissa K\Documents\jcwafflesim\hanger_squid_2tone.png")
